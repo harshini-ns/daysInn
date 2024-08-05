@@ -107,6 +107,71 @@ app.post('/login', async (req, res) => {
 
 
 
+//create a booking API endpoint => POST 
+
+app.post('/bookings', async (req, res) => {
+  const token = req.headers['authorization'];
+
+  if (!token) {
+    return res.status(403).json({ error: 'No token provided' });
+  }
+
+  try {
+    const decoded = jwt.verify(token, SECRET_KEY);
+    req.user_id = decoded.user_id;
+  } catch (error) {
+    return res.status(500).json({ error: 'Failed to authenticate token' });
+  }
+
+  const client = await pool.connect();
+  try {
+    const { hotel_id, start_date, end_date } = req.body;
+    const user_id = req.user_id;  // using the user_id from the decoded token
+
+    const result = await client.query(
+      'INSERT INTO bookings (user_id, hotel_id, start_date, end_date, created_time, updated_time) VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP) RETURNING *',
+      [user_id, hotel_id, start_date, end_date]
+    );
+    const newBooking = result.rows[0];
+    res.status(201).json({ message: "Booking created successfully", booking: newBooking });
+  } catch (error) {
+    console.error("Error creating booking:", error.message);
+    res.status(500).json({ error: "An error occurred while creating the booking", details: error.message });
+  } finally {
+    client.release();
+  }
+});
+
+//
+//get all bookings of a specific user 
+app.get('/bookings', async (req, res) =>{
+  const token = req.headers['authorization'];
+
+  if (!token) {
+    return res.status(403).json({ error: 'No token provided' });
+  }
+
+  try {
+    const decoded = jwt.verify(token, SECRET_KEY);
+    req.user_id = decoded.user_id;
+  } catch (error) {
+    return res.status(500).json({ error: 'Failed to authenticate token' });
+  }
+
+  const client = await pool.connect();
+  try {
+    const result = await client.query('SELECT * FROM bookings WHERE user_id = $1', [req.user_id]);
+    const bookings = result.rows;
+    res.status(200).json({ message: "Bookings retrieved successfully", bookings: bookings });
+  } catch (error) {
+    console.error("Error retrieving bookings:", error.message);
+    res.status(500).json({ error: "An error occurred while retrieving the bookings", details: error.message });
+  } finally {
+    client.release();
+  }
+  
+}
+);
 
 
 /**
