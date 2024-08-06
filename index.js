@@ -157,7 +157,7 @@ app.get('/bookings', async (req, res) =>{
   } catch (error) {
     return res.status(500).json({ error: 'Failed to authenticate token' });
   }
-
+  //
   const client = await pool.connect();
   try {
     const result = await client.query('SELECT * FROM bookings WHERE user_id = $1', [req.user_id]);
@@ -172,6 +172,50 @@ app.get('/bookings', async (req, res) =>{
   
 }
 );
+
+//
+//update a booking 
+
+app.put('/bookings/:booking_id', async (req, res)=>{
+  //jwt token
+  const token= req.headers['authorization'];
+  if(!token){
+    return res.status(403).json({error: 'No token provided'});
+  }
+  try{
+    const decoded= jwt.verify(token, SECRET_KEY);
+    req.user_id = decoded.user_id;
+  } catch(error){
+    return res.status(500).json({error: 'Failed to authenticate token'});
+  }
+
+  //verificaton ends here
+  //now logic 
+  const {booking_id} = req.params; //  booking_id from route parameters and other details from request body
+  const { hotel_id, start_date, end_date}= req.body;
+  const client = await pool.connect();
+  try{
+    //if the booking exists and belongs to the user
+    const checkBooking = await client.query('SELECT * FROM bookings WHERE booking_id=$1 AND user_id=$2', [booking_id, req.user_id] );
+    if(checkBooking.rows.length==0){
+      return res.status(404).json({error : "booking not found"});
+    }
+    //update logic
+    const result = await client.query(' UPDATE bookings SET hotel_id=$1, start_date=$2, end_date=$3 , updated_time=CURRENT_TIMESTAMP WHERE booking_id=$4 RETURNING *', [ hotel_id, start_date, end_date, booking_id]);
+
+    const updatedBooking = result.rows[0];
+    res.status(200).json({message : " booking updated successfully" , booking: updatedBooking} );
+    
+  } catch(error){
+    console.error("error in updating booking", error.message)
+    res.status(500).json({error :" error in booking update", details: error.message});
+  }finally{
+    client.release();
+  }
+} 
+);
+//
+
 
 
 /**
