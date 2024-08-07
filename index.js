@@ -245,6 +245,21 @@ app.delete('/bookings/:booking_id', async (req,res)=>{
       client.release();
     }
 });
+//
+//get all hotels API 
+app.get('/hotels', async (req,res)=>{
+  const client=await pool.connect();
+  try{
+    const result=await client.query('SELECT * FROM hotels');
+    const hotels=result.rows;
+    res.status(200).json({message: "hotels retrieved successfully", hotels: hotels});
+  }catch(error){
+    console.error("error in retrieving hotels", error.message);
+    res.status(500).json({error: "error in retrieving hotels", details: error.message});
+  }finally{
+    client.release();
+  }
+})
 
 /**
  * ADD YOUR ENDPOINT HERE 
