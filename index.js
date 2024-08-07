@@ -216,7 +216,35 @@ app.put('/bookings/:booking_id', async (req, res)=>{
 );
 //
 
-
+//delete a booking 
+app.delete('/bookings/:booking_id', async (req,res)=>{
+  const token=req.headers['authorization'];
+  if(!token){
+    return res.status(403).json({error: 'No token provided'});
+  }
+  try{
+    const decoded=jwt.verify(token, SECRET_KEY);
+    req.user_id=decoded.user_id;
+  } catch(error){
+    return res.status(500).json({error: 'Failed to authenticate token'});
+  }
+  //
+  const {booking_id}=req.params;
+  const client=await pool.connect();
+  try{
+    const checkBooking = await client.query('SELECT * FROM bookings WHERE booking_id=$1 AND user_id=$2', [booking_id, req.user_id] );
+    if(checkBooking.rows.length==0){
+      return res.status(404).json({error : "booking not found"});
+    }
+    await client.query('DELETE FROM bookings WHERE booking_id=$1 RETURNING *', [booking_id]);
+    res.status(200).json({message : "booking deleted successfully"});
+}catch (error) {
+      console.error("Error in deleting booking", error.message);
+      res.status(500).json({ error: "Error in booking deletion", details: error.message });
+    } finally {
+      client.release();
+    }
+});
 
 /**
  * ADD YOUR ENDPOINT HERE 
