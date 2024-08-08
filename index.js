@@ -39,7 +39,7 @@ getPostgresVersion();
 app.post('/signup', async (req, res) => {
   const client = await pool.connect();
   try {
-    const { email, password, phoneNumber, profilePicture } = req.body;
+    const { email, password, phone_number, profile_picture } = req.body;
 
     
     if (!email || !password) {
@@ -52,8 +52,8 @@ app.post('/signup', async (req, res) => {
       return res.status(400).json({ message: "Email is already taken" });
     }
     await client.query(
-      'INSERT INTO users (email, password, phoneNumber, profilePicture) VALUES ($1, $2, $3, $4)',
-      [email, hashedPassword, phoneNumber || null, profilePicture || null]
+      'INSERT INTO users (email, password, phone_number, profile_picture) VALUES ($1, $2, $3, $4)',
+      [email, hashedPassword, phone_number || null, profile_picture || null]
     );
 
     res.status(201).json({ message: "User registered successfully" });
@@ -259,6 +259,36 @@ app.get('/hotels', async (req,res)=>{
   }finally{
     client.release();
   }
+})
+//
+
+//user update (PUT) their own User profile->email, password, phone_number, profile_picture
+app.put('/userUpdate', async (req,res)=>{
+  const token=req.headers['authorization'];
+  if(!token){
+    return res.status(403).json({error: 'No token provided'});
+  }
+  try{
+    const decoded=jwt.verify(token, SECRET_KEY);
+    req.user_id=decoded.user_id;
+  } catch(error){
+    return res.status(500).json({error: 'Failed to authenticate token'});
+  }
+  //
+  const {email, password, phone_number, profile_picture}=req.body;
+  const client=await pool.connect();
+  try{
+    const result= await client.query('UPDATE users SET email=$1, password=$2 , phone_number=$3, profile_picture=$4 WHERE user_id=$5 RETURNING *', [email, password, phone_number, profile_picture , req.user_id]);
+
+    const updatedUser=result.rows[0];
+    res.status(200).json({message: "user profile updated successfully", user: updatedUser});
+  } catch(error){
+    console.error(error.message, "error in updating user data");
+    res.status(400).json({error : "error in user update" , details : error.message});
+  } finally{
+    client.release();
+  }
+
 })
 
 /**
