@@ -394,6 +394,7 @@ app.put("/userUpdate", async (req, res) => {
 
 
 //get user details in profile page 
+//profilepage 
 
 // Endpoint to get user details after login
 app.get("/user/profile", async (req, res) => {
