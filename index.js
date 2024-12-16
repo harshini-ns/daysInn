@@ -9,10 +9,14 @@ require("dotenv").config();
 
 //
 const admin = require("firebase-admin");
-admin.initializeApp({
-  credential: admin.credential.cert(require("./daysinn-6727d-firebase-adminsdk-vbd5w-f60a6f7707.json")), //path is added 
-});//
 
+
+//admin = initializeApp(firebaseConfig);
+admin.initializeApp({
+  credential: admin.credential.cert(
+    require("./daysinn-6727d-firebase-adminsdk-vbd5w-f60a6f7707.json"),
+  ), //path is added
+}); //
 
 let app = express();
 app.use(cors());
@@ -46,25 +50,22 @@ getPostgresVersion();
 app.post("/signup", async (req, res) => {
   const client = await pool.connect();
   try {
-    const { email, password, phone_number, profile_picture } = req.body;
+    const { user_id, phone_number, profile_picture } = req.body;
 
-    if (!email || !password) {
-      return res
-        .status(400)
-        .json({ error: "Email and password are required." });
+    if (!user_id) {
+      return res.status(400).json({ error: "user id is required." });
     }
-    const hashedPassword = await bcrypt.hash(password, 12);
     //sql query added
     const userResult = await client.query(
-      "SELECT * FROM users WHERE email = $1",
-      [email],
+      "SELECT * FROM users WHERE user_id = $1",
+      [user_id],
     );
     if (userResult.rows.length > 0) {
-      return res.status(400).json({ message: "Email is already taken" });
+      return res.status(400).json({ message: "user exists" });
     }
     await client.query(
-      "INSERT INTO users (email, password, phone_number, profile_picture) VALUES ($1, $2, $3, $4)",
-      [email, hashedPassword, phone_number || null, profile_picture || null],
+      "INSERT INTO users (user_id, phone_number, profile_picture) VALUES ($1, $2, $3)",
+      [user_id, phone_number || null, profile_picture || null],
     );
 
     res.status(201).json({ message: "User registered successfully" });
@@ -139,6 +140,7 @@ app.post("/login", async (req, res) => {
 
 app.post("/bookings", async (req, res) => {
   const token = req.headers["authorization"];
+  var userID;
   console.log("Token received in backend:", token);
 
   if (!token) {
@@ -146,8 +148,8 @@ app.post("/bookings", async (req, res) => {
   }
 
   try {
-    const decoded = jwt.verify(token, SECRET_KEY);
-    req.user_id = decoded.user_id;
+    const decoded = await admin.auth().verifyIdToken(token);
+    userID = decoded.uid;
   } catch (error) {
     return res
       .status(403)
@@ -157,7 +159,7 @@ app.post("/bookings", async (req, res) => {
   const client = await pool.connect();
   try {
     const { hotel_id, start_date, end_date } = req.body;
-    const user_id = req.user_id; // using the user_id from the decoded token
+    const user_id = userID; // using the user_id from the decoded token
 
     const result = await client.query(
       "INSERT INTO bookings (user_id, hotel_id, start_date, end_date, created_time, updated_time) VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP) RETURNING *",
@@ -182,14 +184,15 @@ app.post("/bookings", async (req, res) => {
 //get all bookings of a specific user
 app.get("/bookings", async (req, res) => {
   const token = req.headers["authorization"];
+  var userID;
 
   if (!token) {
     return res.status(403).json({ error: "No token provided" });
   }
 
   try {
-    const decoded = jwt.verify(token, SECRET_KEY);
-    req.user_id = decoded.user_id;
+    const decoded = await admin.auth().verifyIdToken(token);
+    userID = decoded.uid;
   } catch (error) {
     return res.status(500).json({ error: "Failed to authenticate token" });
   }
@@ -198,7 +201,7 @@ app.get("/bookings", async (req, res) => {
   try {
     const result = await client.query(
       "SELECT * FROM bookings WHERE user_id = $1",
-      [req.user_id],
+      [userID],
     );
     const bookings = result.rows;
     res
@@ -219,14 +222,15 @@ app.get("/bookings", async (req, res) => {
 //update a booking
 
 app.put("/bookings/:booking_id", async (req, res) => {
+  var userID;
   //jwt token
   const token = req.headers["authorization"];
   if (!token) {
     return res.status(403).json({ error: "No token provided" });
   }
   try {
-    const decoded = jwt.verify(token, SECRET_KEY);
-    req.user_id = decoded.user_id;
+    const decoded = await admin.auth().verifyIdToken(token);
+    userID = decoded.uid;
   } catch (error) {
     return res.status(500).json({ error: "Failed to authenticate token" });
   }
@@ -240,7 +244,7 @@ app.put("/bookings/:booking_id", async (req, res) => {
     //if the booking exists and belongs to the user
     const checkBooking = await client.query(
       "SELECT * FROM bookings WHERE booking_id=$1 AND user_id=$2",
-      [booking_id, req.user_id],
+      [booking_id, userID],
     );
     if (checkBooking.rows.length == 0) {
       return res.status(404).json({ error: "booking not found" });
@@ -269,13 +273,14 @@ app.put("/bookings/:booking_id", async (req, res) => {
 
 //delete a booking
 app.delete("/bookings/:booking_id", async (req, res) => {
+  var userID;
   const token = req.headers["authorization"];
   if (!token) {
     return res.status(403).json({ error: "No token provided" });
   }
   try {
-    const decoded = jwt.verify(token, SECRET_KEY);
-    req.user_id = decoded.user_id;
+    const decoded = await admin.auth().verifyIdToken(token);
+    userID = decoded.uid;
   } catch (error) {
     return res.status(500).json({ error: "Failed to authenticate token" });
   }
@@ -285,7 +290,7 @@ app.delete("/bookings/:booking_id", async (req, res) => {
   try {
     const checkBooking = await client.query(
       "SELECT * FROM bookings WHERE booking_id=$1 AND user_id=$2",
-      [booking_id, req.user_id],
+      [booking_id, userID],
     );
     if (checkBooking.rows.length == 0) {
       return res.status(404).json({ error: "booking not found" });
@@ -348,12 +353,10 @@ app.get("/hotels/:hotel_id", async (req, res) => {
       res.status(200).json(result.rows[0]);
     } catch (error) {
       console.error("error in retrieving hotel by id ", error.message);
-      res
-        .status(500)
-        .json({
-          error: "error in retrieving hotels by id",
-          details: error.message,
-        });
+      res.status(500).json({
+        error: "error in retrieving hotels by id",
+        details: error.message,
+      });
     } finally {
       client.release();
     }
@@ -365,23 +368,24 @@ app.get("/hotels/:hotel_id", async (req, res) => {
 
 //user update (PUT) their own User profile->email, password, phone_number, profile_picture
 app.put("/userUpdate", async (req, res) => {
+  var userID;
   const token = req.headers["authorization"];
   if (!token) {
     return res.status(403).json({ error: "No token provided" });
   }
   try {
-    const decoded = jwt.verify(token, SECRET_KEY);
-    req.user_id = decoded.user_id;
+    const decoded = await admin.auth().verifyIdToken(token);
+    userID = decoded.uid;
   } catch (error) {
     return res.status(500).json({ error: "Failed to authenticate token" });
   }
   //
-  const { email, password, phone_number, profile_picture } = req.body;
+  const { phone_number, profile_picture } = req.body;
   const client = await pool.connect();
   try {
     const result = await client.query(
-      "UPDATE users SET email=$1, password=$2 , phone_number=$3, profile_picture=$4 WHERE user_id=$5 RETURNING *",
-      [email, password, phone_number, profile_picture, req.user_id],
+      "UPDATE users SET phone_number=$1, profile_picture=$2 WHERE user_id=$3 RETURNING *",
+      [phone_number, profile_picture, userID],
     );
 
     const updatedUser = result.rows[0];
@@ -399,12 +403,12 @@ app.put("/userUpdate", async (req, res) => {
   }
 });
 
-
-//get user details in profile page 
-//profilepage 
+//get user details in profile page
+//profilepage
 
 // Endpoint to get user details after login
 app.get("/user/profile", async (req, res) => {
+  var userID;
   const token = req.headers["authorization"];
 
   if (!token) {
@@ -412,15 +416,15 @@ app.get("/user/profile", async (req, res) => {
   }
 
   try {
-    const decoded = jwt.verify(token, SECRET_KEY);
-    req.user_id = decoded.user_id;
+    const decoded = await admin.auth().verifyIdToken(token);
+    userID = decoded.uid;
 
     const client = await pool.connect();
 
     try {
       const result = await client.query(
-        "SELECT user_id, email, phone_number, profile_picture FROM users WHERE user_id = $1",
-        [req.user_id]
+        "SELECT user_id, phone_number, profile_picture FROM users WHERE user_id = $1",
+        [userID],
       );
       if (result.rows.length === 0) {
         return res.status(404).json({ error: "User not found" });
@@ -441,55 +445,56 @@ app.get("/user/profile", async (req, res) => {
   }
 });
 
-//user can chnage the profile pic alone 
+//user can chnage the profile pic alone
 // PATCH route to update the profile picture
-app.patch('/user/updateProfilePic', async (req, res) => {
-  const token = req.headers['authorization'];
+app.patch("/user/updateProfilePic", async (req, res) => {
+  var userID;
+  const token = req.headers["authorization"];
   console.log("Token received in backend:", token);
 
   // Check if token is provided
   if (!token) {
-    return res.status(403).json({ error: 'No token provided' });
+    return res.status(403).json({ error: "No token provided" });
   }
 
   try {
+    const decoded = await admin.auth().verifyIdToken(token);
+    userID = decoded.uid;
     // Verify the token and extract user_id
-    const decoded = jwt.verify(token, SECRET_KEY);
-    req.user_id = decoded.user_id;
   } catch (error) {
     return res
       .status(403)
-      .json({ error: 'Failed to authenticate token', details: error.message });
+      .json({ error: "Failed to authenticate token", details: error.message });
   }
 
   const { profile_picture } = req.body;
-  const user_id = req.user_id; // Using the user_id from the decoded token
+  const user_id = userID; // Using the user_id from the decoded token
   const client = await pool.connect();
 
   try {
     // Check if profile_picture is provided
     if (!profile_picture) {
-      return res.status(400).json({ error: 'No profile picture URL provided' });
+      return res.status(400).json({ error: "No profile picture URL provided" });
     }
 
     // Update the profile picture for the user
     const result = await client.query(
-      'UPDATE users SET profile_picture = $1 WHERE user_id = $2 RETURNING *',
-      [profile_picture, user_id]
+      "UPDATE users SET profile_picture = $1 WHERE user_id = $2 RETURNING *",
+      [profile_picture, user_id],
     );
 
     if (result.rowCount === 0) {
-      return res.status(404).json({ error: 'User not found' });
+      return res.status(404).json({ error: "User not found" });
     }
 
     res.status(200).json({
-      message: 'Profile picture updated successfully',
+      message: "Profile picture updated successfully",
       profile_picture: result.rows[0].profile_picture,
     });
   } catch (error) {
-    console.error('Error updating profile picture:', error.message);
+    console.error("Error updating profile picture:", error.message);
     res.status(500).json({
-      error: 'An error occurred while updating the profile picture',
+      error: "An error occurred while updating the profile picture",
       details: error.message,
     });
   } finally {
@@ -499,37 +504,32 @@ app.patch('/user/updateProfilePic', async (req, res) => {
 /**
  * ADD YOUR ENDPOINT HERE
  */
-//logging in with google firebase 
+//logging in with google firebase
 // Google login endpoint
 app.post("/loginWithGoogle", async (req, res) => {
   const client = await pool.connect();
   try {
-    const { idToken } = req.body; // Google Firebase ID token
+    const { idToken, userID } = req.body; // Google Firebase ID token
 
     // Verify the ID token using Firebase Admin SDK
     const decodedToken = await admin.auth().verifyIdToken(idToken);
-    const email = decodedToken.email;
     const profile_picture = decodedToken.picture || null;
 
     // Check if the user exists in the database by email
-    const userResult = await client.query("SELECT * FROM users WHERE email = $1", [email]);
+    const userResult = await client.query(
+      "SELECT * FROM users WHERE user_id = $1",
+      [userID],
+    );
     let user = userResult.rows[0];
 
     // If user does not exist, create a new user
     if (!user) {
       const result = await client.query(
-        "INSERT INTO users (email, password, phone_number, profile_picture) VALUES ($1, $2, $3, $4) RETURNING *",
-        [email, '', null, profile_picture]
+        "INSERT INTO users (user_id, phone_number, profile_picture) VALUES ($1, $2, $3) RETURNING *",
+        [userID, null, profile_picture],
       );
       user = result.rows[0];
     }
-
-    // Generate a JWT token for session management (if needed)
-    const token = jwt.sign(
-      { user_id: user.user_id, email: user.email },
-      SECRET_KEY,
-      { expiresIn: 86400 }
-    );
 
     // Send success response with user info and token
     res.status(200).json({
@@ -538,7 +538,7 @@ app.post("/loginWithGoogle", async (req, res) => {
         email: user.email,
         profile_picture: user.profile_picture,
       },
-      token,
+      token: idToken,
     });
   } catch (error) {
     console.error("Error during Google login:", error.message);
@@ -550,7 +550,6 @@ app.post("/loginWithGoogle", async (req, res) => {
     client.release();
   }
 });
-
 
 app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname + "/index.html"));
